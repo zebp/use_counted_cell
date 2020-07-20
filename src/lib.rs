@@ -117,7 +117,7 @@ impl<T: Default + Debug> Debug for UseCountedRefCell<T> {
             BorrowFlag::NotBorrowed | BorrowFlag::BorrowedShared => {
                 let value = self.try_borrow().unwrap();
                 debug_struct_formatter.field("value", &value)
-            },
+            }
             BorrowFlag::BorrowedMut => debug_struct_formatter.field("value", &"<mutable borrow>"),
         };
 

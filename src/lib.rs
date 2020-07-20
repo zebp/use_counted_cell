@@ -56,45 +56,43 @@ impl<T: Default> UseCountedRefCell<T> {
             return Err(UseCountedCellBorrowError::AlreadyBorrowed);
         }
 
-        unsafe {
-            self.borrow_flags.store(SHARED_BORROWED, Ordering::SeqCst);
-            self.shared_references.fetch_add(1, Ordering::SeqCst);
+        let value = unsafe { &mut *self.inner.get() };
+        self.borrow_flags.store(SHARED_BORROWED, Ordering::SeqCst);
+        self.shared_references.fetch_add(1, Ordering::SeqCst);
 
-            if self.uses.fetch_add(1, Ordering::SeqCst) >= self.max_uses {
-                let new_value = T::default();
-                core::mem::replace(&mut *self.inner.get(), new_value);
-                self.uses.store(0, Ordering::SeqCst);
-            }
-
-            Ok(UseCountedRefMut {
-                value: &mut *self.inner.get(),
-                cell: self,
-            })
+        if self.uses.fetch_add(1, Ordering::SeqCst) >= self.max_uses {
+            let new_value = T::default();
+            core::mem::replace(value, new_value);
+            self.uses.store(0, Ordering::SeqCst);
         }
+
+        Ok(UseCountedRefMut {
+            value,
+            cell: self,
+        })
     }
 
     pub fn try_borrow_mut(&self) -> Result<UseCountedRefMut<'_, T>, UseCountedCellBorrowError> {
         let borrow_flag = self.borrow_flags.load(Ordering::SeqCst);
 
-        // We can only take a mutable reference when we have exclusive access to the value.
+        // We can only take a mutable reference when we haeve exclusive access to the value.
         if borrow_flag != NOT_BORROWED {
             return Err(UseCountedCellBorrowError::AlreadyBorrowed);
         }
 
-        unsafe {
-            self.borrow_flags.store(SHARED_BORROWED, Ordering::SeqCst);
+        let value = unsafe { &mut *self.inner.get() };
+        self.borrow_flags.store(SHARED_BORROWED, Ordering::SeqCst);
 
-            if self.uses.fetch_add(1, Ordering::SeqCst) >= self.max_uses {
-                let new_value = T::default();
-                core::mem::replace(&mut *self.inner.get(), new_value);
-                self.uses.store(0, Ordering::SeqCst);
-            }
-
-            Ok(UseCountedRefMut {
-                value: &mut *self.inner.get(),
-                cell: self,
-            })
+        if self.uses.fetch_add(1, Ordering::SeqCst) >= self.max_uses {
+            let new_value = T::default();
+            core::mem::replace(value, new_value);
+            self.uses.store(0, Ordering::SeqCst);
         }
+
+        Ok(UseCountedRefMut {
+            value,
+            cell: self,
+        })
     }
 
     pub fn borrow_flag(&self) -> BorrowFlag {

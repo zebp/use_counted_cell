@@ -129,6 +129,8 @@ impl<T: Default + Debug> Debug for UseCountedRefCell<T> {
     }
 }
 
+unsafe impl<T: Default> Sync for UseCountedRefCell<T> {}
+
 pub struct UseCountedRefMut<'b, T: Default> {
     value: &'b mut T,
     cell: &'b UseCountedRefCell<T>,

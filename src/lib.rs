@@ -1,3 +1,4 @@
+#![cfg(not(std))]
 #![no_std]
 
 #[cfg(test)]
@@ -21,6 +22,9 @@ const SHARED_BORROWED: InternalBorrowFlag = 2;
 pub enum UseCountedCellBorrowError {
     AlreadyBorrowed,
 }
+
+#[cfg(std)]
+impl std::error::Error for UseCountedCellBorrowError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BorrowFlag {

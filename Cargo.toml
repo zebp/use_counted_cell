@@ -4,4 +4,8 @@ version = "0.1.0"
 authors = ["vlakreeh <zeb@zebulon.dev>"]
 edition = "2018"
 
+[features]
+default = ["std"]
+std = []
+
 [dependencies]

@@ -1,13 +1,7 @@
-#![cfg(not(std))]
-#![no_std]
-
-#[cfg(test)]
-#[macro_use]
-extern crate std;
-
-use core::{
+use std::{
     cell::UnsafeCell,
-    fmt::Debug,
+    error::Error,
+    fmt::{Debug, Display},
     ops::{Deref, DerefMut},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -23,8 +17,13 @@ pub enum UseCountedCellBorrowError {
     AlreadyBorrowed,
 }
 
-#[cfg(std)]
-impl std::error::Error for UseCountedCellBorrowError {}
+impl Display for UseCountedCellBorrowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AlreadyBorrowed")
+    }
+}
+
+impl Error for UseCountedCellBorrowError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BorrowFlag {
@@ -33,6 +32,10 @@ pub enum BorrowFlag {
     BorrowedMut,
 }
 
+/// Similar to a [RefCell](https://doc.rust-lang.org/std/cell/struct.RefCell.html) but this will revert the value to the default state of `T`
+/// after it has been borrowed immutably or mutably `max_uses` times.
+///
+/// The cell is dynamically borrow checked so there is some runtime overhead.
 pub struct UseCountedRefCell<T: Default> {
     inner: UnsafeCell<T>,
     max_uses: usize,
@@ -42,6 +45,15 @@ pub struct UseCountedRefCell<T: Default> {
 }
 
 impl<T: Default> UseCountedRefCell<T> {
+    /// Creates a new `UseCountedRefCell` that will reset after is it borrowed `max_uses` times.
+    /// The initial value of the cell is the value provided by `T::default()`.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use use_counted_cell::UseCountedRefCell;
+    ///
+    /// let cell: UseCountedRefCell<bool> = UseCountedRefCell::new(10);
+    /// ```
     pub fn new(max_uses: usize) -> Self {
         Self {
             inner: UnsafeCell::new(T::default()),
@@ -52,6 +64,32 @@ impl<T: Default> UseCountedRefCell<T> {
         }
     }
 
+    /// Tries to get a shared reference from the cell.
+    ///
+    /// # Error
+    /// Will return an error if the cell has been mutably borrowed.
+    /// 
+    /// # Examples
+    /// ```rust
+    /// use use_counted_cell::UseCountedRefCell;
+    ///
+    /// let cell: UseCountedRefCell<bool> = UseCountedRefCell::new(10);
+    /// let value = *cell.try_borrow().unwrap();
+    ///
+    /// // bool's default is false
+    /// assert_eq!(value, false);
+    /// ```
+    ///
+    /// An example of an error:
+    ///  ```rust
+    /// use use_counted_cell::UseCountedRefCell;
+    ///
+    /// let cell: UseCountedRefCell<bool> = UseCountedRefCell::new(10);
+    /// let value_mut = cell.try_borrow_mut().unwrap();
+    /// let borrow_result = cell.try_borrow();
+    /// 
+    /// assert!(borrow_result.is_err());
+    /// ```
     pub fn try_borrow(&self) -> Result<UseCountedRefMut<'_, T>, UseCountedCellBorrowError> {
         let borrow_flag = self.borrow_flags.load(Ordering::SeqCst);
 
@@ -70,12 +108,34 @@ impl<T: Default> UseCountedRefCell<T> {
             self.uses.store(0, Ordering::SeqCst);
         }
 
-        Ok(UseCountedRefMut {
-            value,
-            cell: self,
-        })
+        Ok(UseCountedRefMut { value, cell: self })
     }
 
+    /// Tries to get a mutable (exclusive) reference from the cell.
+    ///
+    /// # Error
+    /// Will return an error if the cell has been borrowed.
+    /// 
+    /// # Examples
+    /// ```rust
+    /// use use_counted_cell::UseCountedRefCell;
+    ///
+    /// let cell: UseCountedRefCell<bool> = UseCountedRefCell::new(10);
+    /// let mut value_ref = cell.try_borrow_mut().unwrap();
+    /// *value_ref = true;
+    /// assert_eq!(*value_ref, true);
+    /// ```
+    ///
+    /// An example of an error:
+    ///  ```rust
+    /// use use_counted_cell::UseCountedRefCell;
+    ///
+    /// let cell: UseCountedRefCell<bool> = UseCountedRefCell::new(10);
+    /// let value = cell.try_borrow().unwrap();
+    /// let borrow_mut_result = cell.try_borrow_mut();
+    /// 
+    /// assert!(borrow_mut_result.is_err());
+    /// ```
     pub fn try_borrow_mut(&self) -> Result<UseCountedRefMut<'_, T>, UseCountedCellBorrowError> {
         let borrow_flag = self.borrow_flags.load(Ordering::SeqCst);
 
@@ -85,7 +145,8 @@ impl<T: Default> UseCountedRefCell<T> {
         }
 
         let value = unsafe { &mut *self.inner.get() };
-        self.borrow_flags.store(SHARED_BORROWED, Ordering::SeqCst);
+        self.borrow_flags
+            .store(EXCLUSIVELY_BORROWED, Ordering::SeqCst);
 
         if self.uses.fetch_add(1, Ordering::SeqCst) >= self.max_uses {
             let new_value = T::default();
@@ -93,12 +154,11 @@ impl<T: Default> UseCountedRefCell<T> {
             self.uses.store(0, Ordering::SeqCst);
         }
 
-        Ok(UseCountedRefMut {
-            value,
-            cell: self,
-        })
+        Ok(UseCountedRefMut { value, cell: self })
     }
 
+    /// Gets the state of the cell's borrow status, this is used to dynamically borrow check at runtime.
+    /// This can also be used to check if a call to [try_borrow](struct.UseCountedRefCell.html#method.try_borrow) or [try_borrow_mut](struct.UseCountedRefCell.html#method.try_borrow_mut) will fail.
     pub fn borrow_flag(&self) -> BorrowFlag {
         match self.borrow_flags.load(Ordering::SeqCst) {
             NOT_BORROWED => BorrowFlag::NotBorrowed,
